@@ -1,0 +1,24 @@
+{
+  "name": "brightcove",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "node video_backup.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.10.0",
+    "csv-parse": "^5.6.0",
+    "csv-parser": "^3.2.0",
+    "csv-stringify": "^6.5.2",
+    "dotenv": "^16.5.0",
+    "json2csv": "^6.0.0-alpha.2"
+  }
+}
