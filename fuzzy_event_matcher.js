@@ -1,16 +1,21 @@
-// fuzzy_event_matcher.js
+// fuzzy_event_matcher.js (multi-mode)
 const fs = require('fs');
 const fuzz = require('fuzzball');
 const { parse } = require('csv-parse/sync');
 const { stringify } = require('csv-stringify/sync');
 const dayjs = require('dayjs');
 
+const mode = process.argv[2];
+if (!['matched', 'unmatched'].includes(mode)) {
+  console.error('❌ Usage: node fuzzy_event_matcher.js <matched|unmatched>');
+  process.exit(1);
+}
+
 const videoManifestPath = 'video_manifest.csv';
 const eventListPath = 'fpc_events.csv';
-const scoreThreshold = 60; // tweakable based on real-world matches
-const dateWindowDays = 2; // number of days after the event to allow for upload
+const scoreThreshold = mode === 'matched' ? 60 : 80;
+const dateWindowDays = 2;
 
-// --- Load CSVs ---
 const videoRows = parse(fs.readFileSync(videoManifestPath, 'utf8'), {
   columns: true,
   skip_empty_lines: true,
@@ -21,7 +26,6 @@ const eventRows = parse(fs.readFileSync(eventListPath, 'utf8'), {
   skip_empty_lines: true,
 });
 
-// Normalize keys if BOM present
 const normalizeKey = (row, key) => {
   if (key in row) return row[key];
   const altKey = Object.keys(row).find(k => k.replace(/^\uFEFF/, '') === key);
@@ -41,7 +45,6 @@ for (const event of eventRows) {
 
   const rawName = normalizeKey(event, 'event_name');
   const rawDate = normalizeKey(event, 'event_date');
-
   if (!rawName || !rawDate) {
     console.warn('⚠️ Skipping incomplete or empty event row:', event);
     continue;
@@ -52,17 +55,13 @@ for (const event of eventRows) {
 
   for (const video of videoRows) {
     const matchVal = video.match?.toLowerCase();
-    if (matchVal === 'false') continue; // ignore already false-marked videos
-
-    if (matchVal === 'true' && video.event_name) {
-      // already matched, retain existing
-      continue;
-    }
-
     const createdAt = dayjs(video.created_at.replace(/^'/, '').trim());
     const daysDiff = createdAt.diff(eventDate, 'day');
-
     if (daysDiff < 0 || daysDiff > dateWindowDays) continue;
+
+    const isMatchedMode = (mode === 'matched' && matchVal === 'true');
+    const isUnmatchedMode = (mode === 'unmatched' && (!matchVal || matchVal === ''));
+    if (!isMatchedMode && !isUnmatchedMode) continue;
 
     const candidates = ['description', 'name', 'original_filename'];
     let bestScore = 0;
@@ -72,7 +71,7 @@ for (const event of eventRows) {
       const raw = video[field]?.replace(/^'/, '').trim() || '';
       const partial = fuzz.partial_ratio(raw, eventName);
       const tokenSet = fuzz.token_set_ratio(raw, eventName);
-      const score = Math.max(partial, tokenSet); // prioritize name-like matches
+      const score = Math.max(partial, tokenSet);
 
       if (score > bestScore) {
         bestScore = score;
@@ -81,11 +80,16 @@ for (const event of eventRows) {
     }
 
     if (bestScore >= scoreThreshold) {
-      video.match = 'true';
-      video.match_type = 'event_match';
-      video.match_score = String(bestScore);
-      video.event_name = `'${eventName}'`;
-      video.match_field = bestField;
+      if (mode === 'matched') {
+        video.event_name = `'${eventName}'`;
+        video.match_score = String(bestScore);
+      } else if (mode === 'unmatched') {
+        video.match = 'potential';
+        video.match_type = 'event_match';
+        video.match_score = String(bestScore);
+        video.match_field = bestField;
+        video.event_name = `'${eventName}'`;
+      }
       matchedVideos++;
     }
   }
@@ -98,4 +102,4 @@ const output = stringify(videoRows, {
 });
 
 fs.writeFileSync(videoManifestPath, output, 'utf8');
-console.log(`✅ Fuzzy matching complete. ${matchedVideos} videos matched to events.`);
+console.log(`✅ Fuzzy matching complete. ${matchedVideos} videos processed in ${mode} mode.`);
